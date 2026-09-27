@@ -8,8 +8,8 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.json({ limit: '50mb' }));
 
 const RECORDINGS_DIR = path.join(__dirname, '../recordings');
 fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
@@ -67,7 +67,7 @@ io.on('connection', (socket) => {
   console.log('Conectado:', socket.id);
 
   socket.on('register', (data) => {
-    const { name, team, screenInfo } = data || {};
+    const { name, team } = data || {};
     clients.set(socket.id, {
       id: socket.id,
       name: name || 'Colaborador',
@@ -77,7 +77,6 @@ io.on('connection', (socket) => {
       isOnline: true,
       isRecording: false,
       hasLiveStream: false,
-      screenInfo: screenInfo || null,
       monitorNames: {},
       stats: { cpu: 0, network: 0 }
     });
@@ -148,7 +147,20 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', clients: clients.size, uptime: process.uptime() });
+});
+
+app.get('/dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/dashboard.html'));
+});
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/dashboard.html'));
+});
+
 server.listen(PORT, () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
-  console.log(`Dashboard: http://localhost:${PORT}/dashboard.html`);
+  console.log(`Dashboard: http://localhost:${PORT}/dashboard`);
 });
