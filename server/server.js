@@ -8,11 +8,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-app.use(express.static(path.join(__dirname, '../public')));
 app.use(express.json({ limit: '50mb' }));
-
-const RECORDINGS_DIR = path.join(__dirname, '../recordings');
-fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || 'admin123';
 const clients = new Map();
@@ -24,6 +20,459 @@ function checkAuth(req, res, next) {
   }
   next();
 }
+
+const DASHBOARD_HTML = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Monitoramento de Colaboradores - Dashboard</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+  }
+  header {
+    background: #1e293b;
+    padding: 16px 24px;
+    border-bottom: 1px solid #334155;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .stats { display: flex; gap: 16px; }
+  .stat {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 10px 14px;
+    min-width: 130px;
+  }
+  .stat-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: .08em; }
+  .stat-value { font-size: 20px; font-weight: 700; margin-top: 4px; }
+  .toolbar {
+    padding: 14px 24px;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .toolbar input, .toolbar select {
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .toolbar button {
+    background: #2563eb;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .toolbar button:hover { background: #1d4ed8; }
+  .grid {
+    padding: 24px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 20px;
+  }
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 12px 16px;
+    background: #0f172a;
+    border-bottom: 1px solid #334155;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .card-title { font-weight: 600; }
+  .badge {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    background: #334155;
+    color: #cbd5e1;
+  }
+  .badge.online { background: #16a34a; color: #fff; }
+  .badge.offline { background: #dc2626; color: #fff; }
+  .badge.recording { background: #2563eb; color: #fff; }
+  .screenshot {
+    width: 100%;
+    height: 220px;
+    object-fit: cover;
+    background: #020617;
+    display: block;
+  }
+  .card-body { padding: 12px 16px; }
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .apps { color: #94a3b8; font-size: 13px; }
+  .timestamp { color: #64748b; font-size: 12px; }
+  .empty {
+    padding: 24px;
+    color: #94a3b8;
+    text-align: center;
+  }
+  .recordings {
+    margin-top: 10px;
+    border-top: 1px solid #334155;
+    padding-top: 10px;
+  }
+  .recordings-title {
+    font-size: 12px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 8px;
+  }
+  .recording-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #0f172a;
+    border: 1px solid #334155;
+    padding: 8px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+  .recording-item a {
+    color: #38bdf8;
+    text-decoration: none;
+  }
+  .recording-item a:hover { text-decoration: underline; }
+  .recording-item button {
+    background: transparent;
+    color: #ef4444;
+    border: 1px solid #ef4444;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .refresh-btn {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px #00000040;
+  }
+  .refresh-btn:hover { background: #1d4ed8; }
+  .auth-overlay {
+    position: fixed;
+    inset: 0;
+    background: #0f172a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .auth-box {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 24px;
+    width: 320px;
+    max-width: 90vw;
+  }
+  .auth-box h2 { font-size: 18px; margin-bottom: 12px; }
+  .auth-box input {
+    width: 100%;
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    font-size: 14px;
+  }
+  .auth-box button {
+    width: 100%;
+    background: #2563eb;
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .auth-box button:hover { background: #1d4ed8; }
+</style>
+</head>
+<body>
+  <div class="auth-overlay" id="authOverlay">
+    <div class="auth-box">
+      <h2>Dashboard Privado</h2>
+      <input id="passwordInput" type="password" placeholder="Senha do dashboard" />
+      <button id="authBtn">Entrar</button>
+    </div>
+  </div>
+  <header>
+    <h1>🖥️ Monitoramento de Colaboradores</h1>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Online</div>
+        <div class="stat-value" id="statOnline">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Total</div>
+        <div class="stat-value" id="statTotal">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Última atualização</div>
+        <div class="stat-value" id="statTime" style="font-size:14px;">--</div>
+      </div>
+    </div>
+  </header>
+  <div class="toolbar">
+    <input id="search" placeholder="Buscar colaborador..." />
+    <select id="filter">
+      <option value="all">Todos</option>
+      <option value="online">Online</option>
+      <option value="offline">Offline</option>
+      <option value="recording">Gravando</option>
+    </select>
+    <button id="pause">Pausar atualizações</button>
+    <button id="refresh">Atualizar agora</button>
+  </div>
+  <div class="grid" id="grid"></div>
+  <button class="refresh-btn" id="floatingRefresh">Atualizar</button>
+  <script>
+    const socket = io();
+    const state = new Map();
+    let paused = false;
+    let dashboardPassword = '';
+
+    function fmt(ts) {
+      if (!ts) return '--';
+      return new Date(ts).toLocaleTimeString('pt-BR');
+    }
+
+    function fmtBytes(bytes) {
+      if (!bytes || bytes <= 0) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+    }
+
+    async function api(url) {
+      const res = await fetch(url, {
+        headers: { Authorization: 'Bearer ' + dashboardPassword }
+      });
+      if (res.status === 401) throw new Error('unauthorized');
+      return res.json();
+    }
+
+    async function apiDelete(url) {
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + dashboardPassword }
+      });
+      return res;
+    }
+
+    async function loadRecordings(clientId) {
+      try {
+        return await api('/api/recordings/' + clientId);
+      } catch {
+        return [];
+      }
+    }
+
+    async function render() {
+      const search = document.getElementById('search').value.toLowerCase();
+      const filter = document.getElementById('filter').value;
+      const grid = document.getElementById('grid');
+
+      const entries = Array.from(state.values()).filter((item) => {
+        const matchesSearch = (item.name || '').toLowerCase().includes(search);
+        const matchesFilter =
+          filter === 'all' ||
+          (filter === 'online' && item.isOnline) ||
+          (filter === 'offline' && !item.isOnline) ||
+          (filter === 'recording' && item.isRecording);
+        return matchesSearch && matchesFilter;
+      });
+
+      document.getElementById('statOnline').textContent = entries.filter((i) => i.isOnline).length;
+      document.getElementById('statTotal').textContent = state.size;
+      document.getElementById('statTime').textContent = state.size ? fmt(Date.now()) : '--';
+
+      if (!entries.length) {
+        grid.innerHTML = '<div class="empty">Nenhum colaborador conectado.</div>';
+        return;
+      }
+
+      const items = await Promise.all(
+        entries.map(async (item) => {
+          const image = item.frame ? 'data:image/jpeg;base64,' + item.frame : null;
+          const statusBadge =
+            item.isOnline && item.hasLiveStream
+              ? '<span class="badge online">Ao vivo</span>'
+              : item.isOnline
+                ? '<span class="badge">Online</span>'
+                : '<span class="badge offline">Offline</span>';
+          const recordBadge = item.isRecording
+            ? '<span class="badge recording">Gravando</span>'
+            : '<span class="badge">—</span>';
+          const recordings = await loadRecordings(item.id);
+          const recordingsHtml = recordings
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .slice(0, 5)
+            .map(
+              (r) => `
+                <div class="recording-item">
+                  <div>
+                    <div>${r.filename}</div>
+                    <div style="color:#64748b;">${fmtBytes(r.size)} • ${fmt(r.createdAt)}</div>
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <a href="${r.url}" download>Baixar .webm</a>
+                    <button data-delete="${r.url}" data-client="${item.id}">Excluir</button>
+                  </div>
+                </div>
+              `
+            )
+            .join('');
+          return { item, image, statusBadge, recordBadge, recordingsHtml };
+        })
+      );
+
+      grid.innerHTML = items
+        .map(
+          ({ item, image, statusBadge, recordBadge, recordingsHtml }) => `
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">${item.name} <span style="color:#94a3b8;font-weight:500">• ${item.team}</span></div>
+                <div style="display:flex;gap:8px;align-items:center;">${statusBadge}${recordBadge}</div>
+              </div>
+              <img class="screenshot" src="${image || ''}" alt="live" />
+              <div class="card-body">
+                <div class="meta">
+                  <div class="apps">🕒 ${fmt(item.timestamp)}</div>
+                  <div class="timestamp">${item.stats ? 'CPU ' + item.stats.cpu + '%' : ''}</div>
+                </div>
+                <div class="recordings">
+                  <div class="recordings-title">Gravações recentes</div>
+                  ${recordingsHtml || '<div style="color:#64748b;font-size:12px;">Sem gravações</div>'}
+                </div>
+              </div>
+            </div>
+          `
+        )
+        .join('');
+
+      grid.querySelectorAll('button[data-delete]').forEach((btn) => {
+        btn.onclick = async () => {
+          const url = btn.getAttribute('data-delete');
+          await apiDelete(url);
+          render();
+        };
+      });
+    }
+
+    socket.on('clients:update', (list) => {
+      list.forEach((item) => state.set(item.id, { ...(state.get(item.id) || {}), ...item }));
+      render();
+    });
+
+    socket.on('live:frame', (msg) => {
+      if (paused) return;
+      state.set(msg.clientId, {
+        ...(state.get(msg.clientId) || {}),
+        frame: msg.frame,
+        timestamp: msg.timestamp
+      });
+      render();
+    });
+
+    socket.on('recording:saved', (msg) => {
+      const client = state.get(msg.clientId);
+      if (!client) return;
+      client.recordings = client.recordings || [];
+      client.recordings.push(msg);
+      render();
+    });
+
+    document.getElementById('search').addEventListener('input', render);
+    document.getElementById('filter').addEventListener('change', render);
+    document.getElementById('pause').onclick = (e) => {
+      paused = !paused;
+      e.target.textContent = paused ? 'Retomar atualizações' : 'Pausar atualizações';
+    };
+    document.getElementById('refresh').onclick = render;
+    document.getElementById('floatingRefresh').onclick = render;
+
+    const authOverlay = document.getElementById('authOverlay');
+    const passwordInput = document.getElementById('passwordInput');
+    const authBtn = document.getElementById('authBtn');
+
+    function tryAuth() {
+      dashboardPassword = passwordInput.value.trim();
+      if (!dashboardPassword) return;
+      fetch('/api/clients', {
+        headers: { Authorization: 'Bearer ' + dashboardPassword }
+      })
+        .then((res) => {
+          if (res.status === 401) throw new Error('unauthorized');
+          authOverlay.style.display = 'none';
+        })
+        .catch(() => {
+          passwordInput.value = '';
+          passwordInput.placeholder = 'Senha incorreta';
+        });
+    }
+
+    authBtn.onclick = tryAuth;
+    passwordInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') tryAuth();
+    });
+  </script>
+</body>
+</html>`;
+
+const RECORDINGS_DIR = path.join(__dirname, 'recordings');
+try { fs.mkdirSync(RECORDINGS_DIR, { recursive: true }); } catch {}
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', clients: clients.size });
+});
+
+app.get('/dashboard', (req, res) => {
+  res.send(DASHBOARD_HTML);
+});
+
+app.get('/', (req, res) => {
+  res.send(DASHBOARD_HTML);
+});
 
 app.get('/api/clients', checkAuth, (req, res) => {
   res.json(Array.from(clients.values()));
@@ -41,7 +490,7 @@ app.get('/api/recordings/:clientId', checkAuth, (req, res) => {
         filename: f,
         size: stats.size,
         createdAt: stats.mtimeMs,
-        url: `/recordings/${clientId}/${f}`
+        url: '/recordings/' + clientId + '/' + f
       };
     })
     .sort((a, b) => b.createdAt - a.createdAt);
@@ -91,13 +540,13 @@ io.on('connection', (socket) => {
     client.hasLiveStream = true;
     if (data && data.monitorIndex != null) {
       client.monitorNames = client.monitorNames || {};
-      client.monitorNames[data.monitorIndex] = data.monitorName || `Monitor ${data.monitorIndex + 1}`;
+      client.monitorNames[data.monitorIndex] = data.monitorName || 'Monitor ' + (data.monitorIndex + 1);
     }
     socket.broadcast.emit('live:frame', {
       clientId: socket.id,
       clientName: client.name,
       monitorIndex: data && data.monitorIndex,
-      monitorName: (client.monitorNames || {})[data && data.monitorIndex] || `Monitor ${(data && data.monitorIndex) + 1}`,
+      monitorName: (client.monitorNames || {})[data && data.monitorIndex] || 'Monitor ' + ((data && data.monitorIndex) + 1),
       frame: data && data.frame,
       timestamp: Date.now()
     });
@@ -119,7 +568,7 @@ io.on('connection', (socket) => {
     try {
       const clientDir = path.join(RECORDINGS_DIR, socket.id);
       fs.mkdirSync(clientDir, { recursive: true });
-      const filename = `recording_${Date.now()}.webm`;
+      const filename = 'recording_' + Date.now() + '.webm';
       const filePath = path.join(clientDir, filename);
       const buffer = Buffer.from(data.file, 'base64');
       fs.writeFileSync(filePath, buffer);
@@ -129,7 +578,7 @@ io.on('connection', (socket) => {
         filename,
         size: buffer.length,
         createdAt: Date.now(),
-        url: `/recordings/${socket.id}/${filename}`
+        url: '/recordings/' + socket.id + '/' + filename
       });
     } catch (err) {
       console.error('Erro ao salvar gravacao:', err);
@@ -147,20 +596,6 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', clients: clients.size, uptime: process.uptime() });
-});
-
-app.get('/dashboard', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/dashboard.html'));
-});
-
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/dashboard.html'));
-});
-
-server.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
-  console.log(`Dashboard: http://localhost:${PORT}/dashboard`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('Servidor rodando na porta ' + PORT);
 });
