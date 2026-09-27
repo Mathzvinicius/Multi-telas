@@ -6,7 +6,11 @@ const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, {
+  cors: { origin: '*' },
+  maxHttpBufferSize: 50 * 1024 * 1024,
+  transports: ['websocket', 'polling']
+});
 
 app.use(express.json({ limit: '50mb' }));
 
@@ -47,6 +51,46 @@ app.get('/api/clients', checkAuth, (req, res) => {
   res.json(Array.from(clients.values()));
 });
 
+app.get('/stream/:clientId', async (req, res) => {
+  const clientId = req.params.clientId;
+  const client = clients.get(clientId);
+  if (!client || !client.streamPort) {
+    return res.status(404).send('Stream nao disponivel');
+  }
+
+  // Proxy do stream MJPEG do agente
+  const targetHost = client.localIp || '127.0.0.1';
+  const targetUrl = 'http://' + targetHost + ':' + client.streamPort + '/stream';
+
+  try {
+    const proxyRes = await fetch(targetUrl);
+    if (!proxyRes.ok) {
+      return res.status(502).send('Erro ao conectar ao stream');
+    }
+
+    res.writeHead(proxyRes.status, {
+      'Content-Type': 'multipart/x-mixed-replace; boundary=frame-boundary',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*'
+    });
+
+    proxyRes.body.on('data', (chunk) => {
+      if (!res.writableEnded) res.write(chunk);
+    });
+
+    proxyRes.body.on('end', () => {
+      if (!res.writableEnded) res.end();
+    });
+
+    proxyRes.body.on('error', () => {
+      if (!res.writableEnded) res.end();
+    });
+  } catch (err) {
+    res.status(502).send('Erro no proxy: ' + err.message);
+  }
+});
+
 app.get('/api/recordings/:clientId', checkAuth, (req, res) => {
   const clientId = req.params.clientId;
   const clientDir = path.join(RECORDINGS_DIR, clientId);
@@ -85,8 +129,21 @@ io.on('connection', function(socket) {
   socket.on('register', function(data) {
     const name = (data && data.name) || 'Colaborador';
     const team = (data && data.team) || 'Geral';
+    const agentId = (data && data.agentId) || null;
+
+    if (agentId) {
+      for (const [id, client] of clients) {
+        if (client.agentId === agentId && id !== socket.id) {
+          clients.delete(id);
+          console.log('Removido duplicado:', id);
+          break;
+        }
+      }
+    }
+
     clients.set(socket.id, {
       id: socket.id,
+      agentId: agentId,
       name: name,
       team: team,
       connectedAt: Date.now(),
@@ -95,9 +152,12 @@ io.on('connection', function(socket) {
       isRecording: false,
       hasLiveStream: false,
       monitorNames: {},
-      stats: { cpu: 0, network: 0 }
+      stats: { cpu: 0, network: 0 },
+      streamPort: (data && data.streamPort) || null,
+      localIp: (data && data.localIp) || null
     });
     io.emit('clients:update', Array.from(clients.values()));
+    console.log('Registrado:', name, '| stream:', (data && data.streamPort) || 'nenhum');
   });
 
   socket.on('live:frame', function(data) {

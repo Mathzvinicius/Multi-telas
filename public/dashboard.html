@@ -1,301 +1,437 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Monitoramento de Colaboradores - Dashboard</title>
-<script src="/socket.io/socket.io.js"></script>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, sans-serif;
-    background: #0f172a;
-    color: #e2e8f0;
-    min-height: 100vh;
-  }
-  header {
-    background: #1e293b;
-    padding: 16px 24px;
-    border-bottom: 1px solid #334155;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  header h1 { font-size: 18px; font-weight: 600; }
-  .stats { display: flex; gap: 16px; }
-  .stat {
-    background: #0f172a;
-    border: 1px solid #334155;
-    border-radius: 8px;
-    padding: 10px 14px;
-    min-width: 130px;
-  }
-  .stat-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: .08em; }
-  .stat-value { font-size: 20px; font-weight: 700; margin-top: 4px; }
-
-  .toolbar {
-    padding: 14px 24px;
-    background: #1e293b;
-    border-bottom: 1px solid #334155;
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .toolbar input, .toolbar select {
-    background: #0f172a;
-    border: 1px solid #334155;
-    color: #e2e8f0;
-    padding: 8px 10px;
-    border-radius: 6px;
-    font-size: 14px;
-  }
-  .toolbar button {
-    background: #2563eb;
-    color: white;
-    border: none;
-    padding: 8px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .toolbar button:hover { background: #1d4ed8; }
-
-  .grid {
-    padding: 24px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-    gap: 20px;
-  }
-  .card {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 10px;
-    overflow: hidden;
-  }
-  .card-header {
-    padding: 12px 16px;
-    background: #0f172a;
-    border-bottom: 1px solid #334155;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .card-title { font-weight: 600; }
-  .badge {
-    font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    background: #334155;
-    color: #cbd5e1;
-  }
-  .badge.online { background: #16a34a; color: #fff; }
-  .badge.offline { background: #dc2626; color: #fff; }
-  .badge.recording { background: #2563eb; color: #fff; }
-  .screenshot {
-    width: 100%;
-    height: 220px;
-    object-fit: cover;
-    background: #020617;
-    display: block;
-  }
-  .card-body { padding: 12px 16px; }
-  .meta {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .apps { color: #94a3b8; font-size: 13px; }
-  .timestamp { color: #64748b; font-size: 12px; }
-  .empty {
-    padding: 24px;
-    color: #94a3b8;
-    text-align: center;
-  }
-  .recordings {
-    margin-top: 10px;
-    border-top: 1px solid #334155;
-    padding-top: 10px;
-  }
-  .recordings-title {
-    font-size: 12px;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    margin-bottom: 8px;
-  }
-  .recording-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: #0f172a;
-    border: 1px solid #334155;
-    padding: 8px;
-    border-radius: 6px;
-    margin-bottom: 6px;
-    font-size: 12px;
-  }
-  .recording-item a {
-    color: #38bdf8;
-    text-decoration: none;
-  }
-  .recording-item a:hover { text-decoration: underline; }
-  .recording-item button {
-    background: transparent;
-    color: #ef4444;
-    border: 1px solid #ef4444;
-    padding: 4px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 11px;
-  }
-  .refresh-btn {
-    position: fixed;
-    bottom: 16px;
-    right: 16px;
-    background: #2563eb;
-    color: white;
-    border: none;
-    padding: 10px 14px;
-    border-radius: 8px;
-    cursor: pointer;
-    box-shadow: 0 4px 12px #00000040;
-  }
-  .refresh-btn:hover { background: #1d4ed8; }
-
-  .auth-overlay {
-    position: fixed;
-    inset: 0;
-    background: #0f172a;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-  .auth-box {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 12px;
-    padding: 24px;
-    width: 320px;
-    max-width: 90vw;
-  }
-  .auth-box h2 { font-size: 18px; margin-bottom: 12px; }
-  .auth-box input {
-    width: 100%;
-    background: #0f172a;
-    border: 1px solid #334155;
-    color: #e2e8f0;
-    padding: 10px;
-    border-radius: 6px;
-    margin-bottom: 10px;
-    font-size: 14px;
-  }
-  .auth-box button {
-    width: 100%;
-    background: #2563eb;
-    color: white;
-    border: none;
-    padding: 10px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 14px;
-  }
-  .auth-box button:hover { background: #1d4ed8; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoramento de Colaboradores</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+    .header {
+      background: #1e293b;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #334155;
+    }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .stats { display: flex; gap: 12px; }
+    .stat-box {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px 20px;
+      text-align: center;
+      min-width: 100px;
+    }
+    .stat-box .label {
+      font-size: 11px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .stat-box .value {
+      font-size: 22px;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .toolbar {
+      padding: 16px 24px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+    }
+    .toolbar input, .toolbar select {
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .toolbar input { width: 200px; }
+    .toolbar button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .toolbar button:hover { background: #1d4ed8; }
+    .toolbar button.paused { background: #dc2626; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+      gap: 16px;
+      padding: 24px;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+    .card-title span { color: #64748b; font-weight: 400; }
+    .badges { display: flex; gap: 6px; }
+    .badge {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .badge.online { background: #059669; color: white; }
+    .badge.offline { background: #dc2626; color: white; }
+    .badge.recording { background: #d97706; color: white; }
+    .badge.idle { background: #475569; color: #94a3b8; }
+    .badge.live { background: #059669; color: white; animation: pulse 2s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .screenshot {
+      width: 100%;
+      height: 280px;
+      object-fit: cover;
+      background: #0f172a;
+      display: block;
+    }
+    .screenshot-placeholder {
+      width: 100%;
+      height: 280px;
+      background: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #64748b;
+      font-size: 14px;
+    }
+    .card-body {
+      padding: 12px 16px;
+    }
+    .meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 12px;
+      color: #64748b;
+    }
+    .timestamp { font-family: monospace; }
+    .recordings-title {
+      font-size: 12px;
+      color: #94a3b8;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .recording-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      border-top: 1px solid #334155;
+      font-size: 12px;
+    }
+    .recording-item a {
+      color: #60a5fa;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .recording-item a:hover { text-decoration: underline; }
+    .recording-item button {
+      background: #dc2626;
+      color: white;
+      border: none;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .empty {
+      text-align: center;
+      padding: 60px;
+      color: #64748b;
+      font-size: 16px;
+    }
+    .auth-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.95);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    .auth-box {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 32px;
+      width: 360px;
+    }
+    .auth-box h2 { margin-bottom: 8px; font-size: 18px; }
+    .auth-box p {
+      color: #64748b;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+    .auth-box input {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    .auth-box button {
+      width: 100%;
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .auth-box button:hover { background: #1d4ed8; }
+    .auth-error {
+      color: #ef4444;
+      font-size: 12px;
+      margin-top: 8px;
+      display: none;
+    }
+    .floating-btn {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 100;
+    }
+    .floating-btn:hover { background: #1d4ed8; }
+    .live-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+      margin-right: 6px;
+      animation: pulse 1.5s infinite;
+    }
+  </style>
 </head>
 <body>
   <div class="auth-overlay" id="authOverlay">
     <div class="auth-box">
-      <h2>Dashboard Privado</h2>
-      <input id="passwordInput" type="password" placeholder="Senha do dashboard" />
-      <button id="authBtn">Entrar</button>
+      <h2>Acesso ao Dashboard</h2>
+      <p>Digite a senha para visualizar o monitoramento.</p>
+      <input type="password" id="passwordInput" placeholder="Senha" />
+      <button onclick="doAuth()">Entrar</button>
+      <div class="auth-error" id="authError">Senha incorreta.</div>
     </div>
   </div>
 
-  <header>
-    <h1>🖥️ Monitoramento de Colaboradores</h1>
+  <div class="header">
+    <h1>Monitoramento de Colaboradores</h1>
     <div class="stats">
-      <div class="stat">
-        <div class="stat-label">Online</div>
-        <div class="stat-value" id="statOnline">0</div>
+      <div class="stat-box">
+        <div class="label">Online</div>
+        <div class="value" id="statOnline">0</div>
       </div>
-      <div class="stat">
-        <div class="stat-label">Total</div>
-        <div class="stat-value" id="statTotal">0</div>
+      <div class="stat-box">
+        <div class="label">Total</div>
+        <div class="value" id="statTotal">0</div>
       </div>
-      <div class="stat">
-        <div class="stat-label">Última atualização</div>
-        <div class="stat-value" id="statTime" style="font-size:14px;">--</div>
+      <div class="stat-box">
+        <div class="label">Ultima Atualizacao</div>
+        <div class="value" id="statTime" style="font-size:14px">--</div>
       </div>
     </div>
-  </header>
+  </div>
 
   <div class="toolbar">
-    <input id="search" placeholder="Buscar colaborador..." />
+    <input type="text" id="search" placeholder="Buscar colaborador..." />
     <select id="filter">
       <option value="all">Todos</option>
       <option value="online">Online</option>
       <option value="offline">Offline</option>
       <option value="recording">Gravando</option>
     </select>
-    <button id="pause">Pausar atualizações</button>
-    <button class="secondary" id="refresh">Atualizar agora</button>
+    <button id="pause">Pausar atualizacoes</button>
+    <button id="refresh">Atualizar agora</button>
   </div>
 
   <div class="grid" id="grid"></div>
+  <button class="floating-btn" id="floatingRefresh">Atualizar</button>
 
-  <button class="refresh-btn" id="floatingRefresh">Atualizar</button>
-
+  <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
     const state = new Map();
-    let paused = false;
     let dashboardPassword = '';
+    let paused = false;
+    let cardRefreshInterval = null;
 
     function fmt(ts) {
       if (!ts) return '--';
-      return new Date(ts).toLocaleTimeString('pt-BR');
+      const d = new Date(ts);
+      return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    function fmtBytes(b) {
+      if (!b) return '0 B';
+      const u = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(b) / Math.log(1024));
+      return (b / Math.pow(1024, i)).toFixed(1) + ' ' + u[i];
     }
 
-    function fmtBytes(bytes) {
-      if (!bytes || bytes <= 0) return '0 B';
-      const units = ['B', 'KB', 'MB', 'GB'];
-      const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-      return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+    // Atualiza cards periodicamente (stream MJPEG ja atualiza a imagem)
+    function startCardRefresh() {
+      if (cardRefreshInterval) clearInterval(cardRefreshInterval);
+      cardRefreshInterval = setInterval(() => {
+        if (paused) return;
+        const entries = Array.from(state.values());
+        entries.forEach(item => {
+          const card = document.querySelector('[data-client-id="' + item.id + '"]');
+          if (card) updateCardMeta(card, item);
+        });
+        document.getElementById('statOnline').textContent = entries.filter(i => i.isOnline).length;
+        document.getElementById('statTotal').textContent = state.size;
+        document.getElementById('statTime').textContent = state.size ? fmt(Date.now()) : '--';
+      }, 2000);
     }
 
-    async function api(url) {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${dashboardPassword}` }
-      });
-      if (res.status === 401) throw new Error('unauthorized');
-      return res.json();
+    function createCard(item) {
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.setAttribute('data-client-id', item.id);
+
+      // Usa imagem MJPEG como stream ao vivo (como Discord/Meet)
+      const streamSrc = '/stream/' + item.id + '?' + Date.now();
+
+      div.innerHTML = `
+        <div class="card-header">
+          <div class="card-title">
+            <span class="live-indicator"></span>${item.name} <span style="color:#64748b;font-weight:500">&bull; ${item.team}</span>
+          </div>
+          <div class="badges">
+            <span class="badge idle">OFFLINE</span>
+            <span class="badge idle">&mdash;</span>
+          </div>
+        </div>
+        <img class="screenshot" src="${streamSrc}" alt="live" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+        <div class="screenshot-placeholder" style="display:none">Conectando stream...</div>
+        <div class="card-body">
+          <div class="meta">
+            <div class="apps">&nbsp;</div>
+            <div class="timestamp">&nbsp;</div>
+          </div>
+          <div class="recordings">
+            <div class="recordings-title">Gravacoes recentes</div>
+            <div class="recordings-list">Carregando...</div>
+          </div>
+        </div>
+      `;
+      return div;
     }
 
-    async function apiDelete(url) {
-      const res = await fetch(url, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${dashboardPassword}` }
-      });
-      return res;
+    function updateCardMeta(card, item) {
+      const badges = card.querySelector('.badges');
+      if (!badges) return;
+      let statusBadge = '<span class="badge offline">OFFLINE</span>';
+      if (item.isOnline && item.hasLiveStream) statusBadge = '<span class="badge live">AO VIVO</span>';
+      else if (item.isOnline) statusBadge = '<span class="badge online">ONLINE</span>';
+
+      let recordBadge = '<span class="badge idle">&mdash;</span>';
+      if (item.isRecording) recordBadge = '<span class="badge recording">GRAVANDO</span>';
+
+      badges.innerHTML = statusBadge + recordBadge;
+
+      const appsEl = card.querySelector('.apps');
+      if (appsEl) appsEl.textContent = item.timestamp ? '🕒 ' + fmt(item.timestamp) : '';
+      const tsEl = card.querySelector('.timestamp');
+      if (tsEl) tsEl.textContent = item.stats ? 'CPU ' + item.stats.cpu + '%' : '';
     }
 
-    async function loadRecordings(clientId) {
+    async function updateCardRecordings(card, item) {
+      const listEl = card.querySelector('.recordings-list');
+      if (!listEl) return;
       try {
-        return await api(`/api/recordings/${clientId}`);
+        const res = await fetch('/api/recordings/' + item.id, {
+          headers: { Authorization: 'Bearer ' + dashboardPassword }
+        });
+        const list = await res.json();
+        if (!list.length) {
+          listEl.innerHTML = '<div style="color:#64748b;font-size:12px;">Sem gravacoes</div>';
+          return;
+        }
+        listEl.innerHTML = list.slice(0, 5).map(r => `
+          <div class="recording-item">
+            <div>
+              <div>${r.filename}</div>
+              <div style="color:#64748b;">${fmtBytes(r.size)} &bull; ${fmt(r.createdAt)}</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <a href="${r.url}" download>Baixar</a>
+              <button data-delete="${r.url}" data-client="${item.id}">Excluir</button>
+            </div>
+          </div>
+        `).join('');
+        listEl.querySelectorAll('button[data-delete]').forEach(btn => {
+          btn.onclick = async () => {
+            await fetch(btn.getAttribute('data-delete'), {
+              method: 'DELETE',
+              headers: { Authorization: 'Bearer ' + dashboardPassword }
+            });
+            updateCardRecordings(card, item);
+          };
+        });
       } catch {
-        return [];
+        listEl.innerHTML = '<div style="color:#64748b;font-size:12px;">Sem gravacoes</div>';
       }
     }
 
-    async function render() {
+    function reconcileGrid() {
+      const grid = document.getElementById('grid');
       const search = document.getElementById('search').value.toLowerCase();
       const filter = document.getElementById('filter').value;
-      const grid = document.getElementById('grid');
+
+      const existingCards = new Map();
+      grid.querySelectorAll('.card').forEach(card => {
+        existingCards.set(card.getAttribute('data-client-id'), card);
+      });
 
       const entries = Array.from(state.values()).filter((item) => {
         const matchesSearch = (item.name || '').toLowerCase().includes(search);
@@ -307,7 +443,7 @@
         return matchesSearch && matchesFilter;
       });
 
-      document.getElementById('statOnline').textContent = entries.filter((i) => i.isOnline).length;
+      document.getElementById('statOnline').textContent = entries.filter(i => i.isOnline).length;
       document.getElementById('statTotal').textContent = state.size;
       document.getElementById('statTime').textContent = state.size ? fmt(Date.now()) : '--';
 
@@ -316,87 +452,26 @@
         return;
       }
 
-      const items = await Promise.all(
-        entries.map(async (item) => {
-          const image = item.frame ? `data:image/jpeg;base64,${item.frame}` : null;
-          const statusBadge =
-            item.isOnline && item.hasLiveStream
-              ? '<span class="badge online">Ao vivo</span>'
-              : item.isOnline
-                ? '<span class="badge">Online</span>'
-                : '<span class="badge offline">Offline</span>';
-          const recordBadge = item.isRecording
-            ? '<span class="badge recording">Gravando</span>'
-            : '<span class="badge">—</span>';
-          const recordings = await loadRecordings(item.id);
-          const recordingsHtml = recordings
-            .sort((a, b) => b.createdAt - a.createdAt)
-            .slice(0, 5)
-            .map(
-              (r) => `
-                <div class="recording-item">
-                  <div>
-                    <div>${r.filename}</div>
-                    <div style="color:#64748b;">${fmtBytes(r.size)} • ${fmt(r.createdAt)}</div>
-                  </div>
-                  <div style="display:flex;gap:8px;align-items:center;">
-                    <a href="${r.url}" download>Baixar .webm</a>
-                    <button data-delete="${r.url}" data-client="${item.id}">Excluir</button>
-                  </div>
-                </div>
-              `
-            )
-            .join('');
-          return { item, image, statusBadge, recordBadge, recordingsHtml };
-        })
-      );
+      const keepIds = new Set(entries.map(e => e.id));
 
-      grid.innerHTML = items
-        .map(
-          ({ item, image, statusBadge, recordBadge, recordingsHtml }) => `
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">${item.name} <span style="color:#94a3b8;font-weight:500">• ${item.team}</span></div>
-                <div style="display:flex;gap:8px;align-items:center;">${statusBadge}${recordBadge}</div>
-              </div>
-              <img class="screenshot" src="${image || ''}" alt="live" />
-              <div class="card-body">
-                <div class="meta">
-                  <div class="apps">🕒 ${fmt(item.timestamp)}</div>
-                  <div class="timestamp">${item.stats ? 'CPU ' + item.stats.cpu + '%' : ''}</div>
-                </div>
-                <div class="recordings">
-                  <div class="recordings-title">Gravações recentes</div>
-                  ${recordingsHtml || '<div style="color:#64748b;font-size:12px;">Sem gravações</div>'}
-                </div>
-              </div>
-            </div>
-          `
-        )
-        .join('');
+      existingCards.forEach((card, id) => {
+        if (!keepIds.has(id)) card.remove();
+      });
 
-      grid.querySelectorAll('button[data-delete]').forEach((btn) => {
-        btn.onclick = async () => {
-          const url = btn.getAttribute('data-delete');
-          await apiDelete(url);
-          render();
-        };
+      entries.forEach(item => {
+        let card = existingCards.get(item.id);
+        if (!card) {
+          card = createCard(item);
+          grid.appendChild(card);
+          updateCardRecordings(card, item);
+        }
+        updateCardMeta(card, item);
       });
     }
 
     socket.on('clients:update', (list) => {
       list.forEach((item) => state.set(item.id, { ...(state.get(item.id) || {}), ...item }));
-      render();
-    });
-
-    socket.on('live:frame', (msg) => {
-      if (paused) return;
-      state.set(msg.clientId, {
-        ...(state.get(msg.clientId) || {}),
-        frame: msg.frame,
-        timestamp: msg.timestamp
-      });
-      render();
+      reconcileGrid();
     });
 
     socket.on('recording:saved', (msg) => {
@@ -404,41 +479,41 @@
       if (!client) return;
       client.recordings = client.recordings || [];
       client.recordings.push(msg);
-      render();
+      const card = document.querySelector('[data-client-id="' + msg.clientId + '"]');
+      if (card) updateCardRecordings(card, client);
     });
 
-    document.getElementById('search').addEventListener('input', render);
-    document.getElementById('filter').addEventListener('change', render);
+    document.getElementById('search').addEventListener('input', reconcileGrid);
+    document.getElementById('filter').addEventListener('change', reconcileGrid);
     document.getElementById('pause').onclick = (e) => {
       paused = !paused;
-      e.target.textContent = paused ? 'Retomar atualizações' : 'Pausar atualizações';
+      e.target.textContent = paused ? 'Retomar atualizacoes' : 'Pausar atualizacoes';
+      e.target.classList.toggle('paused', paused);
     };
-    document.getElementById('refresh').onclick = render;
-    document.getElementById('floatingRefresh').onclick = render;
+    document.getElementById('refresh').onclick = reconcileGrid;
+    document.getElementById('floatingRefresh').onclick = reconcileGrid;
 
-    const authOverlay = document.getElementById('authOverlay');
-    const passwordInput = document.getElementById('passwordInput');
-    const authBtn = document.getElementById('authBtn');
-
-    function tryAuth() {
-      dashboardPassword = passwordInput.value.trim();
+    function doAuth() {
+      dashboardPassword = document.getElementById('passwordInput').value.trim();
       if (!dashboardPassword) return;
       fetch('/api/clients', {
-        headers: { Authorization: `Bearer ${dashboardPassword}` }
+        headers: { Authorization: 'Bearer ' + dashboardPassword }
       })
-        .then((res) => {
+        .then(res => {
           if (res.status === 401) throw new Error('unauthorized');
-          authOverlay.style.display = 'none';
+          return res.json();
+        })
+        .then(() => {
+          document.getElementById('authOverlay').style.display = 'none';
+          startCardRefresh();
         })
         .catch(() => {
-          passwordInput.value = '';
-          passwordInput.placeholder = 'Senha incorreta';
+          document.getElementById('authError').style.display = 'block';
         });
     }
 
-    authBtn.onclick = tryAuth;
-    passwordInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') tryAuth();
+    document.getElementById('passwordInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doAuth();
     });
   </script>
 </body>
