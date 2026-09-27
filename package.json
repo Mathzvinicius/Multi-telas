@@ -1,20 +1,17 @@
 {
-  "name": "monitoramento-colaboradores",
+  "name": "monitoramento-servidor",
   "version": "2.0.0",
-  "description": "Sistema de monitoramento de tela com streaming ao vivo e gravacao offline",
+  "description": "Servidor de monitoramento de tela para deploy",
   "private": true,
   "scripts": {
-    "server": "node server/server.js",
-    "agent": "node agent/index-silent.js --silent",
-    "dev": "node server/server.js",
-    "tunnel": "node scripts/tunnel.js"
+    "start": "node server/server.js",
+    "server": "node server/server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "socket.io": "^4.7.2",
-    "screenshot-desktop": "^1.15.0",
-    "active-win": "^7.7.2",
-    "systeminformation": "^5.21.7",
-    "uuid": "^9.0.0"
+    "socket.io": "^4.7.2"
+  },
+  "engines": {
+    "node": "20.x"
   }
 }

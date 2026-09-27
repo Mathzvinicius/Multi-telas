@@ -3,10 +3,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
-const si = require('systeminformation');
-const desktopScreenshot = require('screenshot-desktop');
-const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const server = http.createServer(app);
