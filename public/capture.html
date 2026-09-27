@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Captura de Tela - Monitoramento</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .container {
+    max-width: 640px;
+    width: 100%;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 24px;
+  }
+  h1 { font-size: 18px; margin-bottom: 6px; }
+  .subtitle { color:#94a3b8; font-size:13px; margin-bottom:16px; }
+
+  .status {
+    padding: 12px;
+    border-radius: 8px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    margin-bottom: 16px;
+    font-size: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    background: #334155;
+    color: #cbd5e1;
+  }
+  .badge.online { background: #16a34a; color: #fff; }
+  .badge.offline { background: #dc2626; color: #fff; }
+  .badge.recording { background: #2563eb; color: #fff; }
+  button {
+    background: #2563eb;
+    color: white;
+    border: none;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button:hover { background: #1d4ed8; }
+  button:disabled { background: #475569; cursor: not-allowed; }
+  .secondary { background: #334155; }
+  .secondary:hover { background: #475569; }
+  .logs {
+    background: #020617;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 12px;
+    height: 240px;
+    overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    color: #94a3b8;
+    margin-top: 12px;
+  }
+  .logs .line { margin-bottom: 4px; }
+  .hint {
+    margin-top: 10px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 10px;
+    color: #cbd5e1;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>📡 Captura de Tela</h1>
+    <div class="subtitle">Essa janela pode ficar aberta em segundo plano; para resistir a minimização, selecione <b>Tela inteira</b> ou use o modo background.</div>
+    <div class="status">
+      <div>
+        <div style="color:#94a3b8;font-size:12px;margin-bottom:4px;">Status</div>
+        <span class="badge offline" id="statusBadge">Desconectado</span>
+      </div>
+      <div style="text-align:right;">
+        <div style="color:#94a3b8;font-size:12px;margin-bottom:4px;">Gravação local</div>
+        <span class="badge" id="recordBadge">Parada</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button id="startBtn">Iniciar captura</button>
+      <button id="recordBtn" class="secondary" disabled>Gravar local</button>
+      <button id="stopBtn" class="secondary" disabled>Parar</button>
+      <button id="backgroundBtn" class="secondary" disabled>Modo background</button>
+    </div>
+    <div class="hint" id="hint">Clique em <b>Iniciar captura</b> e escolha <b>Tela inteira</b>. Depois, esta página continua enviando mesmo minimizada.</div>
+    <div class="logs" id="logs"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const logs = document.getElementById('logs');
+    const statusBadge = document.getElementById('statusBadge');
+    const recordBadge = document.getElementById('recordBadge');
+    const startBtn = document.getElementById('startBtn');
+    const recordBtn = document.getElementById('recordBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const backgroundBtn = document.getElementById('backgroundBtn');
+    const hint = document.getElementById('hint');
+
+    let mediaStream = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let localRecordings = [];
+    let frameInterval = null;
+    let frameCanvas = null;
+    let frameCtx = null;
+    let reconnectAttempts = 0;
+
+    function log(msg) {
+      const line = document.createElement('div');
+      line.className = 'line';
+      line.textContent = `[${new Date().toLocaleTimeString('pt-BR')}] ${msg}`;
+      logs.appendChild(line);
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    socket.on('connect', () => {
+      reconnectAttempts = 0;
+      statusBadge.className = 'badge online';
+      statusBadge.textContent = 'Online';
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      log('Conectado ao servidor');
+      uploadPendingRecordings();
+    });
+
+    socket.on('disconnect', () => {
+      statusBadge.className = 'badge offline';
+      statusBadge.textContent = 'Offline';
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      log('Desconectado do servidor');
+    });
+
+    socket.on('connect_error', () => {
+      reconnectAttempts++;
+      log(`Falha na conexão (tentativa ${reconnectAttempts})`);
+    });
+
+    async function startCapture() {
+      try {
+        log('Solicitando captura de tela...');
+        mediaStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 10 } },
+          audio: false,
+          selfBrowserSurface: 'exclude',
+          monitorTypes: ['monitor']
+        });
+
+        mediaStream.getVideoTracks()[0].onended = () => {
+          log('Captura encerrada pelo usuário');
+          stopCapture();
+        };
+
+        log('Captura iniciada');
+        startLocalRecording();
+        sendStream();
+        backgroundBtn.disabled = false;
+        hint.textContent = 'Dica: para evitar interrupção, abra este arquivo em uma janela separada e minimize só a aba. O envio continua.';
+      } catch (err) {
+        log('Erro na captura: ' + err.message);
+      }
+    }
+
+    function startLocalRecording() {
+      recordedChunks = [];
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : 'video/webm;codecs=vp8';
+
+      mediaRecorder = new MediaRecorder(mediaStream, {
+        mimeType,
+        videoBitsPerSecond: 600000
+      });
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (!e.data || e.data.size === 0) return;
+        recordedChunks.push(e.data);
+        if (!socket.connected && recordedChunks.length % 5 === 0) saveRecordingLocally();
+        if (socket.connected && recordedChunks.length >= 5) {
+          const blob = new Blob(recordedChunks.slice(-10), { type: 'video/webm' });
+          const reader = new FileReader();
+          reader.onloadend = () => socket.emit('recording:upload', { file: reader.result.split(',')[1] });
+          reader.readAsDataURL(blob);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `recording_${Date.now()}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        recordedChunks = [];
+      };
+
+      mediaRecorder.start(5000);
+      recordBadge.className = 'badge recording';
+      recordBadge.textContent = 'Gravando';
+      socket.emit('recording:status', { recording: true });
+      log('Gravação iniciada');
+    }
+
+    function saveRecordingLocally() {
+      if (!recordedChunks.length) return;
+      const blob = new Blob(recordedChunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `offline_${Date.now()}.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
+      localRecordings.push({ timestamp: Date.now(), chunks: [...recordedChunks] });
+      recordedChunks = [];
+    }
+
+    async function uploadPendingRecordings() {
+      if (!localRecordings.length) return;
+      log(`Enviando ${localRecordings.length} gravação(ões) offline...`);
+      for (const recording of localRecordings) {
+        const blob = new Blob(recording.chunks, { type: 'video/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => socket.emit('recording:upload', { file: reader.result.split(',')[1] });
+        await new Promise((resolve) => { reader.onloadend = resolve; reader.readAsDataURL(blob); });
+      }
+      localRecordings = [];
+      log('Gravações enviadas');
+    }
+
+    function sendStream() {
+      frameCanvas = document.createElement('canvas');
+      frameCtx = frameCanvas.getContext('2d');
+      const videoTrack = mediaStream.getVideoTracks()[0];
+      const settings = videoTrack.getSettings();
+      frameCanvas.width = settings.width || 1280;
+      frameCanvas.height = settings.height || 720;
+
+      const video = document.createElement('video');
+      video.srcObject = mediaStream;
+      video.play();
+
+      frameInterval = setInterval(() => {
+        if (!socket.connected || video.paused) return;
+        try {
+          frameCtx.drawImage(video, 0, 0, frameCanvas.width, frameCanvas.height);
+          frameCanvas.toBlob((blob) => {
+            if (!blob) return;
+            const reader = new FileReader();
+            reader.onloadend = () => socket.emit('live:frame', { frame: reader.result.split(',')[1] });
+            reader.readAsDataURL(blob);
+          }, 'image/jpeg', 0.75);
+        } catch {}
+      }, 1000);
+    }
+
+    function stopCapture() {
+      if (frameInterval) clearInterval(frameInterval);
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      if (mediaStream) mediaStream.getTracks().forEach((t) => t.stop());
+      mediaStream = null;
+      mediaRecorder = null;
+      recordBadge.className = 'badge';
+      recordBadge.textContent = 'Parada';
+      socket.emit('recording:status', { recording: false });
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      recordBtn.disabled = true;
+      backgroundBtn.disabled = true;
+      hint.textContent = 'Clique em <b>Iniciar captura</b> e escolha <b>Tela inteira</b>. Depois, esta página continua enviando mesmo minimizada.';
+      log('Captura parada');
+    }
+
+    startBtn.onclick = async () => {
+      startBtn.disabled = true;
+      await startCapture();
+      stopBtn.disabled = false;
+      recordBtn.disabled = false;
+    };
+
+    recordBtn.onclick = () => {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        startLocalRecording();
+      } else if (mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        recordBadge.className = 'badge';
+        recordBadge.textContent = 'Parada';
+        socket.emit('recording:status', { recording: false });
+      }
+    };
+
+    stopBtn.onclick = stopCapture;
+    backgroundBtn.onclick = () => {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+      log('Modo background ativado: minimize a janela e continue usando o PC normalmente.');
+    };
+  </script>
+</body>
+</html>

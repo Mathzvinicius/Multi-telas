@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Monitoramento - Transmissao Ativa</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .container { max-width: 420px; margin: 0 auto; }
+  h1 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color:#94a3b8; font-size:12px; margin-bottom:16px; }
+
+  .status-bar {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #475569;
+  }
+  .dot.online { background: #16a34a; box-shadow: 0 0 0 2px #16a34a40; }
+  .dot.offline { background: #dc2626; }
+  .dot.error { background: #ca8a04; }
+  .status-text { font-size: 13px; font-weight: 600; }
+
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .card-title {
+    font-size: 11px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 8px;
+  }
+  .preview {
+    width: 100%;
+    border-radius: 6px;
+    background: #020617;
+    border: 1px solid #334155;
+    min-height: 120px;
+  }
+  .row { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
+  select, input[type="text"] {
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    width: 100%;
+  }
+  button {
+    background: #2563eb;
+    color: white;
+    border: none;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:hover { background: #1d4ed8; }
+  button.secondary { background: #334155; }
+  button.secondary:hover { background: #475569; }
+
+  .info { color: #94a3b8; font-size: 12px; margin-top: 6px; }
+  .meta { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+  .chip {
+    background: #0f172a;
+    border: 1px solid #334155;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #cbd5e1;
+  }
+  .apps { color: #94a3b8; font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>📡 Monitoramento Ativo</h1>
+    <div class="subtitle">Sua tela esta sendo transmitida para o gestor. Voce pode ver o status abaixo.</div>
+
+    <div class="status-bar">
+      <div class="dot offline" id="statusDot"></div>
+      <div class="status-text" id="statusText">Inicializando...</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Tela atual</div>
+      <img class="preview" id="preview" alt="preview" />
+      <div class="meta">
+        <div class="chip" id="screenLabel">Carregando...</div>
+        <div class="chip" id="timeLabel">--</div>
+      </div>
+      <div class="row">
+        <select id="screenSelect"><option>Carregando monitores...</option></select>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Aplicativos em uso</div>
+      <div class="apps" id="apps">Sem dados</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Acoes</div>
+      <div class="row">
+        <button id="minBtn">Minimizar para bandeja</button>
+        <button id="showBtn" class="secondary">Restaurar janela</button>
+      </div>
+      <div class="row">
+        <button id="quitBtn" class="secondary">Sair</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const preview = document.getElementById('preview');
+    const screenLabel = document.getElementById('screenLabel');
+    const timeLabel = document.getElementById('timeLabel');
+    const appsLabel = document.getElementById('apps');
+    const screenSelect = document.getElementById('screenSelect');
+    const minBtn = document.getElementById('minBtn');
+    const showBtn = document.getElementById('showBtn');
+    const quitBtn = document.getElementById('quitBtn');
+    const minBtn2 = document.getElementById('minBtn2');
+    const quitBtn2 = document.getElementById('quitBtn2');
+
+    function setStatus(state, label) {
+      statusDot.className = 'dot ' + state;
+      statusText.textContent = label;
+    }
+
+    function fmt(ts) {
+      if (!ts) return '--';
+      return new Date(ts).toLocaleTimeString('pt-BR');
+    }
+
+    window.electronAPI.onStatus((data) => setStatus(data.state, data.label));
+    window.electronAPI.onAppInfo((data) => {
+      screenSelect.innerHTML = '';
+      for (let i = 0; i < (data.totalScreens || 1); i++) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `Monitor ${i + 1}`;
+        screenSelect.appendChild(opt);
+      }
+    });
+
+    window.electronAPI.onCapture((data) => {
+      if (data.frame) preview.src = 'data:image/png;base64,' + data.frame;
+      screenLabel.textContent = `${data.monitorName || 'Monitor 1'}`;
+      timeLabel.textContent = fmt(data.timestamp);
+      appsLabel.textContent = (data.apps || [])
+        .map((a) => `${a.name}${a.title ? ` - ${a.title}` : ''}`)
+        .join(', ') || 'Sem dados';
+    });
+
+    screenSelect.addEventListener('change', (e) => window.electronAPI.onChangeScreen(parseInt(e.target.value, 10)));
+    minBtn.addEventListener('click', () => window.electronAPI.onMinimizeToTray());
+    showBtn.addEventListener('click', () => { /* handled by tray */ });
+    quitBtn.addEventListener('click', () => window.electronAPI.onQuitApp());
+  </script>
+</body>
+</html>

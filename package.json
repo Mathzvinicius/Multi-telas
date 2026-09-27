@@ -1,0 +1,20 @@
+{
+  "name": "monitoramento-colaboradores",
+  "version": "2.0.0",
+  "description": "Sistema de monitoramento de tela com streaming ao vivo e gravacao offline",
+  "private": true,
+  "scripts": {
+    "server": "node server/server.js",
+    "agent": "node agent/index-silent.js --silent",
+    "dev": "node server/server.js",
+    "tunnel": "node scripts/tunnel.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "screenshot-desktop": "^1.15.0",
+    "active-win": "^7.7.2",
+    "systeminformation": "^5.21.7",
+    "uuid": "^9.0.0"
+  }
+}
