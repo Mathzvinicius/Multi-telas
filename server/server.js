@@ -115,7 +115,7 @@ io.on('connection', function(socket) {
       clientName: client.name,
       monitorIndex: data && data.monitorIndex,
       monitorName: (client.monitorNames || {})[data && data.monitorIndex] || 'Monitor ' + ((data && data.monitorIndex) + 1),
-      frame: data && data.frame,
+      frame: data && data.image,
       timestamp: Date.now()
     });
   });
