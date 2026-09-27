@@ -16,15 +16,24 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 
 const RECORDINGS_DIR = path.join(__dirname, '../recordings');
-try { fs.mkdirSync(RECORDINGS_DIR, { recursive: true }); } catch {}
+fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || 'admin123';
 const clients = new Map();
 
-app.get('/api/clients', (req, res) => {
+function checkAuth(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth || auth !== `Bearer ${DASHBOARD_PASSWORD}`) {
+    return res.status(401).json({ error: 'Nao autorizado' });
+  }
+  next();
+}
+
+app.get('/api/clients', checkAuth, (req, res) => {
   res.json(Array.from(clients.values()));
 });
 
-app.get('/api/recordings/:clientId', (req, res) => {
+app.get('/api/recordings/:clientId', checkAuth, (req, res) => {
   const clientId = req.params.clientId;
   const clientDir = path.join(RECORDINGS_DIR, clientId);
   if (!fs.existsSync(clientDir)) return res.json([]);
@@ -43,14 +52,14 @@ app.get('/api/recordings/:clientId', (req, res) => {
   res.json(files);
 });
 
-app.get('/recordings/:clientId/:filename', (req, res) => {
+app.get('/recordings/:clientId/:filename', checkAuth, (req, res) => {
   const { clientId, filename } = req.params;
   const filePath = path.join(RECORDINGS_DIR, clientId, filename);
   if (!fs.existsSync(filePath)) return res.sendStatus(404);
   res.download(filePath);
 });
 
-app.delete('/api/recordings/:clientId/:filename', (req, res) => {
+app.delete('/api/recordings/:clientId/:filename', checkAuth, (req, res) => {
   const { clientId, filename } = req.params;
   const filePath = path.join(RECORDINGS_DIR, clientId, filename);
   if (!fs.existsSync(filePath)) return res.sendStatus(404);

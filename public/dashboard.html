@@ -165,9 +165,57 @@
     box-shadow: 0 4px 12px #00000040;
   }
   .refresh-btn:hover { background: #1d4ed8; }
+
+  .auth-overlay {
+    position: fixed;
+    inset: 0;
+    background: #0f172a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .auth-box {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 24px;
+    width: 320px;
+    max-width: 90vw;
+  }
+  .auth-box h2 { font-size: 18px; margin-bottom: 12px; }
+  .auth-box input {
+    width: 100%;
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    font-size: 14px;
+  }
+  .auth-box button {
+    width: 100%;
+    background: #2563eb;
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .auth-box button:hover { background: #1d4ed8; }
 </style>
 </head>
 <body>
+  <div class="auth-overlay" id="authOverlay">
+    <div class="auth-box">
+      <h2>Dashboard Privado</h2>
+      <input id="passwordInput" type="password" placeholder="Senha do dashboard" />
+      <button id="authBtn">Entrar</button>
+    </div>
+  </div>
+
   <header>
     <h1>🖥️ Monitoramento de Colaboradores</h1>
     <div class="stats">
@@ -206,6 +254,7 @@
     const socket = io();
     const state = new Map();
     let paused = false;
+    let dashboardPassword = '';
 
     function fmt(ts) {
       if (!ts) return '--';
@@ -219,7 +268,31 @@
       return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
     }
 
-    function render() {
+    async function api(url) {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${dashboardPassword}` }
+      });
+      if (res.status === 401) throw new Error('unauthorized');
+      return res.json();
+    }
+
+    async function apiDelete(url) {
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${dashboardPassword}` }
+      });
+      return res;
+    }
+
+    async function loadRecordings(clientId) {
+      try {
+        return await api(`/api/recordings/${clientId}`);
+      } catch {
+        return [];
+      }
+    }
+
+    async function render() {
       const search = document.getElementById('search').value.toLowerCase();
       const filter = document.getElementById('filter').value;
       const grid = document.getElementById('grid');
@@ -243,8 +316,8 @@
         return;
       }
 
-      grid.innerHTML = entries
-        .map((item) => {
+      const items = await Promise.all(
+        entries.map(async (item) => {
           const image = item.frame ? `data:image/jpeg;base64,${item.frame}` : null;
           const statusBadge =
             item.isOnline && item.hasLiveStream
@@ -255,7 +328,8 @@
           const recordBadge = item.isRecording
             ? '<span class="badge recording">Gravando</span>'
             : '<span class="badge">—</span>';
-          const recordings = (item.recordings || [])
+          const recordings = await loadRecordings(item.id);
+          const recordingsHtml = recordings
             .sort((a, b) => b.createdAt - a.createdAt)
             .slice(0, 5)
             .map(
@@ -273,7 +347,13 @@
               `
             )
             .join('');
-          return `
+          return { item, image, statusBadge, recordBadge, recordingsHtml };
+        })
+      );
+
+      grid.innerHTML = items
+        .map(
+          ({ item, image, statusBadge, recordBadge, recordingsHtml }) => `
             <div class="card">
               <div class="card-header">
                 <div class="card-title">${item.name} <span style="color:#94a3b8;font-weight:500">• ${item.team}</span></div>
@@ -287,24 +367,19 @@
                 </div>
                 <div class="recordings">
                   <div class="recordings-title">Gravações recentes</div>
-                  ${recordings || '<div style="color:#64748b;font-size:12px;">Sem gravações</div>'}
+                  ${recordingsHtml || '<div style="color:#64748b;font-size:12px;">Sem gravações</div>'}
                 </div>
               </div>
             </div>
-          `;
-        })
+          `
+        )
         .join('');
 
       grid.querySelectorAll('button[data-delete]').forEach((btn) => {
         btn.onclick = async () => {
           const url = btn.getAttribute('data-delete');
-          const clientId = btn.getAttribute('data-client');
-          await fetch(url, { method: 'DELETE' });
-          const client = Array.from(state.values()).find((c) => c.id === clientId);
-          if (client) {
-            client.recordings = (client.recordings || []).filter((r) => r.url !== url);
-            render();
-          }
+          await apiDelete(url);
+          render();
         };
       });
     }
@@ -324,12 +399,6 @@
       render();
     });
 
-    socket.on('live:stats', (msg) => {
-      const client = state.get(msg.clientId);
-      if (!client) return;
-      client.stats = msg.stats || client.stats;
-    });
-
     socket.on('recording:saved', (msg) => {
       const client = state.get(msg.clientId);
       if (!client) return;
@@ -346,6 +415,31 @@
     };
     document.getElementById('refresh').onclick = render;
     document.getElementById('floatingRefresh').onclick = render;
+
+    const authOverlay = document.getElementById('authOverlay');
+    const passwordInput = document.getElementById('passwordInput');
+    const authBtn = document.getElementById('authBtn');
+
+    function tryAuth() {
+      dashboardPassword = passwordInput.value.trim();
+      if (!dashboardPassword) return;
+      fetch('/api/clients', {
+        headers: { Authorization: `Bearer ${dashboardPassword}` }
+      })
+        .then((res) => {
+          if (res.status === 401) throw new Error('unauthorized');
+          authOverlay.style.display = 'none';
+        })
+        .catch(() => {
+          passwordInput.value = '';
+          passwordInput.placeholder = 'Senha incorreta';
+        });
+    }
+
+    authBtn.onclick = tryAuth;
+    passwordInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') tryAuth();
+    });
   </script>
 </body>
 </html>
