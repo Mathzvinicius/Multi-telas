@@ -8,7 +8,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' },
-  maxHttpBufferSize: 50 * 1024 * 1024,
+  maxHttpBufferSize: 20 * 1024 * 1024,
   transports: ['websocket', 'polling']
 });
 
