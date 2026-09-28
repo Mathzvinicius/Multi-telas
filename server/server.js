@@ -128,14 +128,18 @@ io.on('connection', function(socket) {
     const team = (data && data.team) || 'Geral';
     const agentId = (data && data.agentId) || null;
 
+    // Remove TODAS as conexoes antigas do mesmo agentId (sem duplicatas)
     if (agentId) {
+      const toRemove = [];
       for (const [id, client] of clients) {
         if (client.agentId === agentId && id !== socket.id) {
-          clients.delete(id);
-          console.log('Removido duplicado:', id);
-          break;
+          toRemove.push(id);
         }
       }
+      toRemove.forEach(function(id) {
+        clients.delete(id);
+        console.log('Removido duplicado:', id, '| agentId:', agentId.slice(0, 8));
+      });
     }
 
     const liveFile = path.join(LIVE_DIR, socket.id + '.webm');
