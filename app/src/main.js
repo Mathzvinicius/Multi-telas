@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, screen } = require('electron');
 const path = require('path');
 const os = require('os');
 const { io } = require('socket.io-client');
