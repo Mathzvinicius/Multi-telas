@@ -23,6 +23,7 @@ let totalScreens = 1;
 let notified = false;
 let captureWindow = null;
 let isCapturing = false;
+let started = false;
 
 function showStartupNotification() {
   if (notified) return;
@@ -65,6 +66,17 @@ function connectSocket() {
   socket.on('connect_error', (err) => {
     console.log('Erro conexao:', err.message);
   });
+
+  // Marca este agente como ativo periodicamente
+  setInterval(() => {
+    if (socket && socket.connected) {
+      socket.emit('register', {
+        name: hostname + ' (' + userName + ')',
+        team: 'Geral',
+        agentId: AGENT_ID
+      });
+    }
+  }, 30000);
 }
 
 async function detectScreens() {
@@ -229,6 +241,8 @@ function stopCapture() {
 }
 
 app.whenReady().then(function() {
+  if (started) return;
+  started = true;
   console.log('=== Monitoramento v1.0 (Video Stream) ===');
   console.log('Hostname:', hostname);
   console.log('Usuario:', userName);

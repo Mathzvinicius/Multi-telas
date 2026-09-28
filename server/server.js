@@ -216,7 +216,7 @@ io.on('connection', function(socket) {
 
 setInterval(function() {
   const now = Date.now();
-  const maxAge = 10 * 60 * 1000;
+  const maxAge = 5 * 60 * 1000; // 5 minutos sem heartbeat = offline
   try {
     const files = fs.readdirSync(LIVE_DIR);
     files.forEach(function(f) {
@@ -227,7 +227,15 @@ setInterval(function() {
       }
     });
   } catch {}
-}, 5 * 60 * 1000);
+
+  // Remove clientes offline antigos
+  for (const [id, client] of clients) {
+    if (now - client.lastSeen > maxAge) {
+      clients.delete(id);
+    }
+  }
+  io.emit('clients:update', Array.from(clients.values()));
+}, 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', function() {
