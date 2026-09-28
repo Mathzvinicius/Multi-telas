@@ -113,6 +113,15 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.6; }
     }
+    .video-container {
+      position: relative;
+      width: 100%;
+      height: 280px;
+      background: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
     .screenshot {
       width: 100%;
       height: 280px;
@@ -251,6 +260,18 @@
       margin-right: 6px;
       animation: pulse 1.5s infinite;
     }
+    .stream-status {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
@@ -303,6 +324,7 @@
     const state = new Map();
     let dashboardPassword = '';
     let paused = false;
+    let videoRefreshInterval = null;
 
     function fmt(ts) {
       if (!ts) return '--';
@@ -325,7 +347,12 @@
           '<div class="card-title"><span class="live-indicator"></span>' + item.name + ' <span style="color:#64748b;font-weight:500">&bull; ' + item.team + '</span></div>' +
           '<div class="badges"><span class="badge idle">OFFLINE</span><span class="badge idle">&mdash;</span></div>' +
         '</div>' +
-        '<img class="screenshot" src="" alt="live" />' +
+        '<div class="video-container">' +
+          '<video class="screenshot" autoplay muted playsinline>' +
+            '<source src="/live/' + item.id + '.webm" type="video/webm">' +
+          '</video>' +
+          '<div class="stream-status">AO VIVO</div>' +
+        '</div>' +
         '<div class="card-body">' +
           '<div class="meta"><div class="apps">&nbsp;</div><div class="timestamp">&nbsp;</div></div>' +
           '<div class="recordings"><div class="recordings-title">Gravacoes recentes</div><div class="recordings-list">Carregando...</div></div>' +
@@ -347,16 +374,6 @@
       if (appsEl) appsEl.textContent = item.timestamp ? '\u{1F552} ' + fmt(item.timestamp) : '';
       const tsEl = card.querySelector('.timestamp');
       if (tsEl) tsEl.textContent = item.stats ? 'CPU ' + item.stats.cpu + '%' : '';
-    }
-
-    function updateCardImage(card, frame) {
-      const img = card.querySelector('.screenshot');
-      if (!img) return;
-      if (frame) {
-        img.src = 'data:image/jpeg;base64,' + frame;
-      } else {
-        img.src = '';
-      }
     }
 
     async function updateCardRecordings(card, item) {
@@ -428,23 +445,12 @@
           updateCardRecordings(card, item);
         }
         updateCardMeta(card, item);
-        if (item.frame) updateCardImage(card, item.frame);
       });
     }
 
     socket.on('clients:update', function(list) {
       list.forEach(function(item) { state.set(item.id, Object.assign({}, state.get(item.id) || {}, item)); });
       reconcileGrid();
-    });
-
-    socket.on('live:frame', function(msg) {
-      if (paused) return;
-      var client = state.get(msg.clientId);
-      if (!client) return;
-      client.frame = msg.frame;
-      client.timestamp = msg.timestamp;
-      var card = document.querySelector('[data-client-id="' + msg.clientId + '"]');
-      if (card) updateCardImage(card, msg.frame);
     });
 
     socket.on('recording:saved', function(msg) {

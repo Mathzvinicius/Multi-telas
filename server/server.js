@@ -8,7 +8,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' },
-  maxHttpBufferSize: 20 * 1024 * 1024,
+  maxHttpBufferSize: 50 * 1024 * 1024,
   transports: ['websocket', 'polling']
 });
 
@@ -16,6 +16,10 @@ app.use(express.json({ limit: '50mb' }));
 
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || 'admin123';
 const clients = new Map();
+const LIVE_DIR = path.join(__dirname, 'live');
+const RECORDINGS_DIR = path.join(__dirname, 'recordings');
+try { fs.mkdirSync(LIVE_DIR, { recursive: true }); } catch {}
+try { fs.mkdirSync(RECORDINGS_DIR, { recursive: true }); } catch {}
 
 function checkAuth(req, res, next) {
   const auth = req.headers.authorization;
@@ -26,8 +30,6 @@ function checkAuth(req, res, next) {
 }
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-const RECORDINGS_DIR = path.join(__dirname, 'recordings');
-try { fs.mkdirSync(RECORDINGS_DIR, { recursive: true }); } catch {}
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', clients: clients.size });
@@ -51,43 +53,38 @@ app.get('/api/clients', checkAuth, (req, res) => {
   res.json(Array.from(clients.values()));
 });
 
-app.get('/stream/:clientId', async (req, res) => {
+app.get('/live/:clientId', (req, res) => {
   const clientId = req.params.clientId;
-  const client = clients.get(clientId);
-  if (!client || !client.streamPort) {
+  const liveFile = path.join(LIVE_DIR, clientId + '.webm');
+  if (!fs.existsSync(liveFile)) {
     return res.status(404).send('Stream nao disponivel');
   }
 
-  // Proxy do stream MJPEG do agente
-  const targetHost = client.localIp || '127.0.0.1';
-  const targetUrl = 'http://' + targetHost + ':' + client.streamPort + '/stream';
+  const stat = fs.statSync(liveFile);
+  const fileSize = stat.size;
+  const range = req.headers.range;
 
-  try {
-    const proxyRes = await fetch(targetUrl);
-    if (!proxyRes.ok) {
-      return res.status(502).send('Erro ao conectar ao stream');
-    }
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = (end - start) + 1;
 
-    res.writeHead(proxyRes.status, {
-      'Content-Type': 'multipart/x-mixed-replace; boundary=frame-boundary',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*'
+    const fileStream = fs.createReadStream(liveFile, { start, end });
+    res.writeHead(206, {
+      'Content-Range': 'bytes ' + start + '-' + end + '/' + fileSize,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': 'video/webm'
     });
-
-    proxyRes.body.on('data', (chunk) => {
-      if (!res.writableEnded) res.write(chunk);
+    fileStream.pipe(res);
+  } else {
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': 'video/webm',
+      'Accept-Ranges': 'bytes'
     });
-
-    proxyRes.body.on('end', () => {
-      if (!res.writableEnded) res.end();
-    });
-
-    proxyRes.body.on('error', () => {
-      if (!res.writableEnded) res.end();
-    });
-  } catch (err) {
-    res.status(502).send('Erro no proxy: ' + err.message);
+    fs.createReadStream(liveFile).pipe(res);
   }
 });
 
@@ -141,6 +138,9 @@ io.on('connection', function(socket) {
       }
     }
 
+    const liveFile = path.join(LIVE_DIR, socket.id + '.webm');
+    fs.writeFileSync(liveFile, Buffer.alloc(0));
+
     clients.set(socket.id, {
       id: socket.id,
       agentId: agentId,
@@ -150,34 +150,25 @@ io.on('connection', function(socket) {
       lastSeen: Date.now(),
       isOnline: true,
       isRecording: false,
-      hasLiveStream: false,
+      hasLiveStream: true,
       monitorNames: {},
-      stats: { cpu: 0, network: 0 },
-      streamPort: (data && data.streamPort) || null,
-      localIp: (data && data.localIp) || null
+      stats: { cpu: 0, network: 0 }
     });
     io.emit('clients:update', Array.from(clients.values()));
-    console.log('Registrado:', name, '| stream:', (data && data.streamPort) || 'nenhum');
+    console.log('Registrado:', name, '| online:', clients.size);
   });
 
-  socket.on('live:frame', function(data) {
+  socket.on('live:chunk', function(data) {
     const client = clients.get(socket.id);
     if (!client) return;
-    client.lastSeen = Date.now();
-    client.isOnline = true;
-    client.hasLiveStream = true;
-    if (data && data.monitorIndex != null) {
-      client.monitorNames = client.monitorNames || {};
-      client.monitorNames[data.monitorIndex] = data.monitorName || 'Monitor ' + (data.monitorIndex + 1);
+
+    try {
+      const liveFile = path.join(LIVE_DIR, socket.id + '.webm');
+      const chunkBuf = Buffer.from(data, 'base64');
+      fs.appendFileSync(liveFile, chunkBuf);
+    } catch (err) {
+      console.error('Erro ao salvar chunk:', err);
     }
-    socket.broadcast.emit('live:frame', {
-      clientId: socket.id,
-      clientName: client.name,
-      monitorIndex: data && data.monitorIndex,
-      monitorName: (client.monitorNames || {})[data && data.monitorIndex] || 'Monitor ' + ((data && data.monitorIndex) + 1),
-      frame: data && data.image,
-      timestamp: Date.now()
-    });
   });
 
   socket.on('live:stats', function(data) {
@@ -222,6 +213,21 @@ io.on('connection', function(socket) {
     io.emit('clients:update', Array.from(clients.values()));
   });
 });
+
+setInterval(function() {
+  const now = Date.now();
+  const maxAge = 10 * 60 * 1000;
+  try {
+    const files = fs.readdirSync(LIVE_DIR);
+    files.forEach(function(f) {
+      const fp = path.join(LIVE_DIR, f);
+      const stat = fs.statSync(fp);
+      if (now - stat.mtimeMs > maxAge) {
+        fs.unlinkSync(fp);
+      }
+    });
+  } catch {}
+}, 5 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', function() {
